@@ -19,8 +19,6 @@ services:
  
     environment:
       APPLICATION_LOGS_TO_STDOUT: "true"
-      # Belt-and-braces: tells renv's autoloader to stand down. May not survive
-      # shiny-server's "su --login", which is why we also mask .Rprofile below.
       RENV_CONFIG_AUTOLOADER_ENABLED: "FALSE"
       TZ: Etc/UTC
  
@@ -28,15 +26,15 @@ services:
       - source: shiny_server_conf
         target: /etc/shiny-server/shiny-server.conf
         mode: 0444
-      # THE FIX: replaces the repo's .Rprofile (which activates renv) with an
-      # inert comment. All R packages are already installed system-wide by the
-      # Dockerfile, so renv has no job to do inside this container.
       - source: rprofile_noop
         target: /srv/shiny-server/fragpipe-analyst/.Rprofile
         mode: 0444
  
     volumes:
       - shiny_logs:/var/log/shiny-server
+      # Persistent extra R library. Lets you install missing packages into a
+      # running container without rebuilding the image — they survive redeploys.
+      - extra_rlib:/opt/rlibs
  
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/3838"]
@@ -45,7 +43,6 @@ services:
       retries: 5
       start_period: 120s
  
-    # Uncomment and adjust if the container gets OOM-killed on large datasets.
     # deploy:
     #   resources:
     #     limits:
@@ -56,15 +53,23 @@ configs:
     content: |
       # renv autoloader intentionally disabled inside the container.
       # Packages are installed system-wide via the Dockerfile.
+      #
+      # Add /opt/rlibs (a persistent volume) to the library search path so
+      # packages installed there are visible to the Shiny app. Set via .Rprofile
+      # rather than an env var, because shiny-server's "su --login" wipes the
+      # container environment before starting R.
+      local({
+        extra <- "/opt/rlibs"
+        if (dir.exists(extra)) .libPaths(c(extra, .libPaths()))
+      })
  
   shiny_server_conf:
     content: |
-      # If PDF/report export later fails with a permission error, switch to: run_as root;
+      # If PDF/report export later fails with a permission error, use: run_as root;
       run_as shiny;
  
       preserve_logs true;
-      # Keep this false until everything works, then flip to true to hide
-      # internal R errors from end users.
+      # Flip to true once the app works, to hide internal R errors from users.
       sanitize_errors false;
  
       http_keepalive_timeout 3600;
@@ -77,7 +82,7 @@ configs:
           log_dir /var/log/shiny-server;
           directory_index on;
  
-          # Default is 60s; this app needs longer to load Bioconductor packages.
+          # Default is 60s; this app needs far longer on a cold start.
           app_init_timeout 1800;
           app_idle_timeout 3600;
         }
@@ -85,3 +90,4 @@ configs:
  
 volumes:
   shiny_logs:
+  extra_rlib:
