@@ -22,28 +22,70 @@ RUN Rscript -e 'install.packages(c("devtools", "BiocManager", "tidyverse", "ggre
 RUN Rscript -e 'devtools::install_github("Appsilon/shiny.info")'
 RUN Rscript -e 'BiocManager::install(pkgs=c("ensembldb", "EnsDb.Hsapiens.v86", "SummarizedExperiment", "limma", "ComplexHeatmap", "MSnbase", "missForest", "impute", "pcaMethods"), ask=F, dependencies=TRUE)'
 
-### ---------------------------------------------------------------------------
-### FIX 1: the original package list is incomplete AND BiocManager::install()
-### only warns on failure, so the image shipped without MSnbase, clusterProfiler,
-### ReactomePA, org.Hs.eg.db, org.Mm.eg.db and rmdformats. Install them with
-### dependencies=NA (Depends/Imports/LinkingTo only - no fragile Suggests),
-### then HARD FAIL the build if anything the app needs is still absent.
-### ---------------------------------------------------------------------------
-RUN Rscript -e 'BiocManager::install(c("ProtGenerics", "mzR", "MSnbase", "impute", "pcaMethods", "missForest", \
-"vsn", "preprocessCore", "MALDIquant", "clusterProfiler", "ReactomePA", "org.Hs.eg.db", "org.Mm.eg.db"), \
-ask=FALSE, update=FALSE, dependencies=NA)'
+### ===========================================================================
+### DIAGNOSTIC MODE: install the packages the original list forgot, one at a
+### time, logging every failure to /build-logs/ inside the image. This RUN never
+### fails the build, so the container always starts and the logs can be read.
+###
+### MAKEFLAGS=-j1 keeps peak compiler memory low: mzR bundles the ProteoWizard
+### C++ sources and parallel make is what gets OOM-killed on small hosts.
+### ===========================================================================
+ENV MAKEFLAGS="-j1"
 
-RUN Rscript -e 'install.packages("rmdformats", dependencies=NA)'
+RUN <<'RSCRIPT' cat > /tmp/install_extras.R
+options(Ncpus = 1)
 
-RUN Rscript -e 'req <- c("MSnbase","mzR","ProtGenerics","impute","pcaMethods","missForest", \
-"clusterProfiler","ReactomePA","org.Hs.eg.db","org.Mm.eg.db","rmdformats", \
-"ensembldb","EnsDb.Hsapiens.v86","SummarizedExperiment","limma","ComplexHeatmap", \
-"imputeLCMD","tmvtnorm","mvtnorm","shiny","shinydashboard","shinyjs","shinyalert", \
-"shinyBS","shinyWidgets","shinycssloaders","rhandsontable","plotly","DT","svglite", \
-"ggVennDiagram","ggrepel","factoextra","UpSetR","vegan","fastcluster","fdrtool", \
-"shiny.info","conflicted","data.table","httr","rjson","jsonlite","png","assertthat"); \
-miss <- req[!req %in% rownames(installed.packages())]; \
-if (length(miss)) stop("BUILD ABORTED - packages missing: ", paste(miss, collapse=", ")) else cat("OK: all required packages present\n")'
+pkgs_cran <- c("rmdformats")
+pkgs_bioc <- c("ProtGenerics", "mzR", "MSnbase", "impute", "pcaMethods",
+               "missForest", "clusterProfiler", "ReactomePA",
+               "org.Hs.eg.db", "org.Mm.eg.db")
+
+for (p in c(pkgs_cran, pkgs_bioc)) {
+  cat("\n\n##### INSTALLING:", p, "#####\n")
+  tryCatch({
+    if (p %in% pkgs_cran) {
+      install.packages(p, dependencies = NA)
+    } else {
+      BiocManager::install(p, ask = FALSE, update = FALSE, dependencies = NA)
+    }
+  }, error = function(e) cat("R-LEVEL ERROR for ", p, ": ", conditionMessage(e), "\n", sep = ""))
+  ok <- p %in% rownames(installed.packages())
+  cat("##### RESULT:", p, if (ok) "OK" else "FAILED", "#####\n")
+}
+
+req <- c("MSnbase", "mzR", "ProtGenerics", "impute", "pcaMethods", "missForest",
+         "clusterProfiler", "ReactomePA", "org.Hs.eg.db", "org.Mm.eg.db", "rmdformats",
+         "ensembldb", "EnsDb.Hsapiens.v86", "SummarizedExperiment", "limma",
+         "ComplexHeatmap", "imputeLCMD", "tmvtnorm", "mvtnorm", "shiny",
+         "shinydashboard", "shinyjs", "shinyalert", "shinyBS", "shinyWidgets",
+         "shinycssloaders", "rhandsontable", "plotly", "DT", "svglite",
+         "ggVennDiagram", "ggrepel", "factoextra", "UpSetR", "vegan",
+         "fastcluster", "fdrtool", "shiny.info", "conflicted", "data.table",
+         "httr", "rjson", "jsonlite", "png", "assertthat")
+
+miss <- req[!req %in% rownames(installed.packages())]
+writeLines(if (length(miss)) miss else "none", "/build-logs/MISSING_PACKAGES.txt")
+cat("\n\n########## MISSING AT END OF BUILD:",
+    if (length(miss)) paste(miss, collapse = ", ") else "none", "##########\n")
+RSCRIPT
+
+RUN <<'SH' bash
+set -x
+mkdir -p /build-logs
+echo "=== build-time memory ==="  >  /build-logs/build-env.log
+free -h                           >> /build-logs/build-env.log 2>&1
+echo "=== cpus: $(nproc) ==="     >> /build-logs/build-env.log
+
+# Never fail the build - we want the container up so the logs are readable.
+Rscript /tmp/install_extras.R > /build-logs/bioc-install.log 2>&1 || true
+
+# Surface the important lines in the Portainer build output.
+echo "########## PER-PACKAGE RESULTS ##########"
+grep -E "^##### RESULT|^R-LEVEL ERROR|^########## MISSING" /build-logs/bioc-install.log || true
+echo "########## MEMORY / COMPILER FAILURES ##########"
+grep -iE "killed|cannot allocate|virtual memory exhausted|out of memory|fatal error|non-zero exit status" /build-logs/bioc-install.log | head -30 || true
+echo "########## END - full log at /build-logs/bioc-install.log ##########"
+SH
 
 COPY ./ /srv/shiny-server/fragpipe-analyst
 COPY shiny-server.conf.prod /etc/shiny-server/shiny-server.conf
@@ -52,9 +94,7 @@ COPY shiny-server.conf.prod /etc/shiny-server/shiny-server.conf
 WORKDIR /srv/shiny-server/fragpipe-analyst
 RUN rm "google_analytics.html" && touch "google_analytics.html"
 
-### FIX 2: drop .Rprofile so renv's autoloader never runs inside the container.
-### Packages are installed system-wide, so renv has nothing to do here, and its
-### bootstrap fails because renv/library/ is not writable by the 'shiny' user.
+### Drop .Rprofile so renv's autoloader never runs inside the container.
 RUN rm -f .Rprofile
 
 RUN chmod -R +r /srv/shiny-server/fragpipe-analyst
