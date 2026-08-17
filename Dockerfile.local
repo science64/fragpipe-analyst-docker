@@ -22,11 +22,39 @@ RUN Rscript -e 'install.packages(c("devtools", "BiocManager", "tidyverse", "ggre
 RUN Rscript -e 'devtools::install_github("Appsilon/shiny.info")'
 RUN Rscript -e 'BiocManager::install(pkgs=c("ensembldb", "EnsDb.Hsapiens.v86", "SummarizedExperiment", "limma", "ComplexHeatmap", "MSnbase", "missForest", "impute", "pcaMethods"), ask=F, dependencies=TRUE)'
 
-### RUN Rscript -e 'install.packages("renv")'
+### ---------------------------------------------------------------------------
+### FIX 1: the original package list is incomplete AND BiocManager::install()
+### only warns on failure, so the image shipped without MSnbase, clusterProfiler,
+### ReactomePA, org.Hs.eg.db, org.Mm.eg.db and rmdformats. Install them with
+### dependencies=NA (Depends/Imports/LinkingTo only - no fragile Suggests),
+### then HARD FAIL the build if anything the app needs is still absent.
+### ---------------------------------------------------------------------------
+RUN Rscript -e 'BiocManager::install(c("ProtGenerics", "mzR", "MSnbase", "impute", "pcaMethods", "missForest", \
+"vsn", "preprocessCore", "MALDIquant", "clusterProfiler", "ReactomePA", "org.Hs.eg.db", "org.Mm.eg.db"), \
+ask=FALSE, update=FALSE, dependencies=NA)'
+
+RUN Rscript -e 'install.packages("rmdformats", dependencies=NA)'
+
+RUN Rscript -e 'req <- c("MSnbase","mzR","ProtGenerics","impute","pcaMethods","missForest", \
+"clusterProfiler","ReactomePA","org.Hs.eg.db","org.Mm.eg.db","rmdformats", \
+"ensembldb","EnsDb.Hsapiens.v86","SummarizedExperiment","limma","ComplexHeatmap", \
+"imputeLCMD","tmvtnorm","mvtnorm","shiny","shinydashboard","shinyjs","shinyalert", \
+"shinyBS","shinyWidgets","shinycssloaders","rhandsontable","plotly","DT","svglite", \
+"ggVennDiagram","ggrepel","factoextra","UpSetR","vegan","fastcluster","fdrtool", \
+"shiny.info","conflicted","data.table","httr","rjson","jsonlite","png","assertthat"); \
+miss <- req[!req %in% rownames(installed.packages())]; \
+if (length(miss)) stop("BUILD ABORTED - packages missing: ", paste(miss, collapse=", ")) else cat("OK: all required packages present\n")'
+
 COPY ./ /srv/shiny-server/fragpipe-analyst
 COPY shiny-server.conf.prod /etc/shiny-server/shiny-server.conf
 
 ### replace google_analytics.html with a new empty file
 WORKDIR /srv/shiny-server/fragpipe-analyst
-RUN rm -f .Rprofile
 RUN rm "google_analytics.html" && touch "google_analytics.html"
+
+### FIX 2: drop .Rprofile so renv's autoloader never runs inside the container.
+### Packages are installed system-wide, so renv has nothing to do here, and its
+### bootstrap fails because renv/library/ is not writable by the 'shiny' user.
+RUN rm -f .Rprofile
+
+RUN chmod -R +r /srv/shiny-server/fragpipe-analyst
