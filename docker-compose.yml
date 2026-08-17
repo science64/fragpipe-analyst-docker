@@ -1,42 +1,59 @@
 # FragPipe-Analyst — Docker Compose
-
+# App URL: http://<host-ip>:3838/fragpipe-analyst/
+ 
 services:
   fragpipe-analyst:
     build:
-      context: .
+      context: https://github.com/science64/FragPipe-Analyst-Docker.git#main
       dockerfile: Dockerfile.local
-      # platforms:
-      #   - linux/amd64
-
+ 
     image: fragpipe-analyst:local
-
     pull_policy: build
-
+ 
     container_name: fragpipe-analyst
     restart: unless-stopped
-
+ 
     ports:
       - "3838:3838"
-
+ 
     environment:
-
       APPLICATION_LOGS_TO_STDOUT: "true"
       TZ: Etc/UTC
-
+ 
+    configs:
+      - source: shiny_server_conf
+        target: /etc/shiny-server/shiny-server.conf
+        mode: 0444
+ 
     volumes:
       - shiny_logs:/var/log/shiny-server
-
+ 
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/3838"]
       interval: 30s
       timeout: 5s
       retries: 5
-      start_period: 40s
-
-    # deploy:
-    #   resources:
-    #     limits:
-    #       memory: 8G
-
+      start_period: 120s
+ 
+configs:
+  shiny_server_conf:
+    content: |
+      run_as shiny;
+      preserve_logs true;
+      sanitize_errors false;
+      http_keepalive_timeout 3600;
+ 
+      server {
+        listen 3838;
+ 
+        location / {
+          site_dir /srv/shiny-server;
+          log_dir /var/log/shiny-server;
+          directory_index on;
+          app_init_timeout 1800;
+          app_idle_timeout 3600;
+        }
+      }
+ 
 volumes:
   shiny_logs:
