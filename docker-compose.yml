@@ -1,7 +1,6 @@
 # FragPipe-Analyst — Docker Compose
 # App URL: http://<host-ip>:3838/fragpipe-analyst/
  
-
 services:
   fragpipe-analyst:
     build:
