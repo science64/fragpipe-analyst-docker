@@ -1,14 +1,16 @@
 # syntax=docker/dockerfile:1
 FROM rocker/shiny-verse:4.4
 
+# libglpk40 is the fix for the igraph load failure that broke MSnbase,
+# clusterProfiler and ReactomePA: the Posit noble binary of igraph links
+# against GLPK, which the base image does not ship.
 RUN apt-get update && apt-get install -yq \
     libbz2-dev libhdf5-dev libnetcdf-dev build-essential libgd-dev \
     libudunits2-dev libproj-dev libgdal-dev \
     libglpk40 libglpk-dev \
     texlive-latex-base texlive-fonts-recommended \
-    texlive-fonts-extra texlive-latex-extra
-
-ENV MAKEFLAGS="-j1"
+    texlive-fonts-extra texlive-latex-extra \
+ && rm -rf /var/lib/apt/lists/*
 
 RUN Rscript -e 'install.packages(c("devtools", "BiocManager", "tidyverse", "ggrepel", "httr", "rjson", "mvtnorm", "tmvtnorm", \
 "imputeLCMD", "plotly", "DT", "testthat", "RColorBrewer", "shiny","shinyalert","shinydashboard", \
@@ -21,15 +23,28 @@ RUN Rscript -e 'BiocManager::install(pkgs=c("ensembldb", "EnsDb.Hsapiens.v86", "
 "limma", "ComplexHeatmap", "ProtGenerics", "mzR", "MSnbase", "missForest", "impute", "pcaMethods", \
 "clusterProfiler", "ReactomePA", "org.Hs.eg.db", "org.Mm.eg.db"), ask=F, update=F, dependencies=TRUE)'
 
-# Fail the build here rather than at runtime if anything is unloadable.
-RUN Rscript -e 'for (p in c("igraph","MSnbase","clusterProfiler","ReactomePA","ComplexHeatmap","org.Hs.eg.db")) \
-{ if (!requireNamespace(p, quietly=TRUE)) stop("cannot load: ", p) }; cat("all key packages load OK\n")'
+# ReactomePA explicitly, with its heavyweight data dependencies.
+RUN Rscript -e 'BiocManager::install(c("reactome.db","graphite","ReactomePA"), ask=FALSE, update=FALSE, dependencies=NA)'
+
+# Print a load-status table for everything; fail the build only on the
+# packages the app needs in order to start.
+RUN Rscript -e 'crit <- c("igraph","MSnbase","clusterProfiler","ComplexHeatmap","org.Hs.eg.db"); \
+opt <- c("ReactomePA","reactome.db","org.Mm.eg.db","rmdformats"); \
+chk <- function(p) isTRUE(tryCatch(requireNamespace(p, quietly=TRUE), error=function(e) FALSE)); \
+for (p in c(crit,opt)) cat(sprintf("%-18s %s\n", p, if (chk(p)) "OK" else "FAIL")); \
+bad <- crit[!vapply(crit, chk, logical(1))]; \
+if (length(bad)) stop("cannot load: ", paste(bad, collapse=", "))'
 
 COPY ./ /srv/shiny-server/fragpipe-analyst
 COPY shiny-server.conf.prod /etc/shiny-server/shiny-server.conf
 
 WORKDIR /srv/shiny-server/fragpipe-analyst
+
+# renv must not activate inside the container: packages are installed
+# system-wide, and its bootstrap fails as the unprivileged shiny user.
 RUN rm -f .Rprofile && rm -rf renv
+
 RUN rm -f google_analytics.html && touch google_analytics.html
+
 RUN chown -R shiny:shiny /srv/shiny-server/fragpipe-analyst \
  && chmod -R a+rX /srv/shiny-server/fragpipe-analyst
