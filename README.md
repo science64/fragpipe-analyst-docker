@@ -69,7 +69,7 @@ cd FragPipe-Analyst
 
 ``` sh
 # Clone the repository
-git clone https://github.com/MonashProteomics/FragPipe-Analyst.git
+git clone https://github.com/science64/fragpipe-analyst-docker.git
 
 # Move to the folder
 cd FragPipe-Analyst
