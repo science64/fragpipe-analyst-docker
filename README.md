@@ -72,7 +72,7 @@ cd FragPipe-Analyst
 git clone https://github.com/science64/fragpipe-analyst-docker.git
 
 # Move to the folder
-cd FragPipe-Analyst
+cd fragpipe-analyst-docker
 
 # Build FragPipe-Analyst (Any name after -t)
 docker buildx build -f Dockerfile.local -t fragpipe-analyst  --output=type=docker --platform=linux/amd64 .
