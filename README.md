@@ -1,7 +1,7 @@
 [![Project Status: Active – The project has reached a stable, usable state and is being actively developed.](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active)
 ![R](https://img.shields.io/badge/R-%3E4.4-brightgreen)
 
-# FragPipe-Analyst
+# FragPipe-Analyst (To install via Docker and usage directly on browser locally)
 
 A tool for analyzing quantitative proteomics datasets for [FragPipe](https://fragpipe.nesvilab.org/).
 
@@ -39,33 +39,9 @@ Now documentation is all moved to [here](https://fragpipe-analyst-doc.nesvilab.o
 
 Two options are available right now for FragPipe-Analyst: local installation or run through Docker.
 
-### Local Installation
-
-#### Prerequisite
-- R >= 4.4
-- PDFlatex
-
-Once all the prerequisites are installed, follow steps below to build and run the server locally.
-
-``` sh
-# Clone the repository
-git clone https://github.com/MonashProteomics/FragPipe-Analys.git
-
-# Move to the folder
-cd FragPipe-Analyst
-
-# Inside R console or R studio
-> install.packages("renv")
-> renv::init(bioconductor = T)
-
-# Install shiny.info, it's removed from CRAN since 2025-03-21 https://cran.r-project.org/web/packages/shiny.info/index.html, so we need to install their github version
-> renv::install("Appsilon/shiny.info")
-
-# Execute
-> shiny::runApp()
-```
-
 ### Installation through Docker:
+
+Installation might take 1 hour, as it is downloading and installing many R modules. But it is fully working.
 
 ``` sh
 # Clone the repository
