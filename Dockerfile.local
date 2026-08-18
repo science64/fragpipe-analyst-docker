@@ -44,7 +44,10 @@ WORKDIR /srv/shiny-server/fragpipe-analyst
 # system-wide, and its bootstrap fails as the unprivileged shiny user.
 RUN rm -f .Rprofile && rm -rf renv
 
-RUN rm -f google_analytics.html && touch google_analytics.html
+# Strip analytics WITHOUT leaving a zero-byte file: ui.R passes this to
+# includeHTML(), and detect_html_document() errors on an empty file with
+# "argument is of length zero". One comment line is enough to satisfy it.
+RUN printf '<!-- analytics disabled -->\n' > google_analytics.html
 
 RUN chown -R shiny:shiny /srv/shiny-server/fragpipe-analyst \
  && chmod -R a+rX /srv/shiny-server/fragpipe-analyst
